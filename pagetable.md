@@ -1,6 +1,25 @@
 # Pagetable in xv6
 
-[toc]
+- [Why need pagetable ?](#why-need-pagetable-)
+  - [Isolation](#isolation)
+  - [Multiplex](#multiplex)
+  - [Indirection](#indirection)
+- [What  pagetable looks like ?](#what--pagetable-looks-like-)
+  - [Basics](#basics)
+  - [Mapping mechanism](#mapping-mechanism)
+  - [Flags](#flags)
+  - [Tips](#tips)
+  - [Problems](#problems)
+- [Better Idea ?](#better-idea-)
+  - [Improved Mapping Mechanism](#improved-mapping-mechanism)
+  - [Advantage](#advantage)
+- [Explore the code](#explore-the-code)
+  - [Create page table](#create-page-table)
+    - [walk](#walk)
+    - [mappages](#mappages)
+  - [Free page table](#free-page-table)
+    - [uvmunmap](#uvmunmap)
+    - [freewalk](#freewalk)
 
 ## Why need pagetable ?
 
