@@ -4,7 +4,7 @@
   - [Isolation](#isolation)
   - [Multiplex](#multiplex)
   - [Indirection](#indirection)
-- [What  pagetable looks like ?](#what--pagetable-looks-like-)
+- [What does pagetable looks like ?](#what-does-pagetable-looks-like-)
   - [Basics](#basics)
   - [Mapping mechanism](#mapping-mechanism)
   - [Flags](#flags)
