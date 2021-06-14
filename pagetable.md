@@ -367,14 +367,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 ```
 
 The basic idea of above code shows below.
-
-```mermaid
-graph LR
-	walk --PTE--> id0[check map]
-    id0 --"va-PTE mapped"--> id1[check leaf]
-    id1 --"PTE-pa mapped"--> id2[free pa]
-    id2 --"free mapped pa"--> id3[set PTE null]
-```
+![unmap_graph](./pic/unmap_graph.png)
 
 All those steps are intuitive except check leaf. what makes a leaf ?
 
