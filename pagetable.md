@@ -45,7 +45,7 @@ Pagetable **hardwire** connects these two kinds of addresses, by mapping each va
 
 
 
-## What  pagetable looks like ?
+## What does pagetable looks like ?
 
 ### Basics
 
