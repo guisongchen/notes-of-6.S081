@@ -1,6 +1,14 @@
 # Interrupts and device drivers
 
-[toc]
+- [What does a driver do](#what-does-a-driver-do)
+- [How does a driver executes](#how-does-a-driver-executes)
+- [Drivers example](#drivers-example)
+  - [Console input](#console-input)
+    - [Initialize UART hardware](#initialize-uart-hardware)
+    - [User process(shell) read](#user-processshell-read)
+    - [Type interrupt handle](#type-interrupt-handle)
+  - [Console output](#console-output)
+  - [Timer interrupts](#timer-interrupts)
 
 ## What does a driver do
 
