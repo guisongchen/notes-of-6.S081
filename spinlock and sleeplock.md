@@ -3,13 +3,18 @@
 - [Spinlocks](#spinlocks)
   - [struct spinlock](#struct-spinlock)
   - [acquire](#acquire)
+    - [sync_lock_test_and_set](#sync-lock-test-and-set)
+    - [sync_synchronize](#sync-synchronize)
   - [release](#release)
 - [Sleep locks](#sleep-locks)
   - [Why sleep locks](#why-sleep-locks)
   - [struct sleeplock](#struct-sleeplock)
   - [acquiresleep](#acquiresleep)
   - [releasesleep](#releasesleep)
-- [compare](#compare)
+- [Compare](#compare)
+- [Locks and interrupt handlers](#locks-and-interrupt-handlers)
+  - [Deadlock scenario](#deadlock-scenario)
+  - [Solution](#solution)
 
 ## Spinlocks
 
@@ -58,6 +63,8 @@ acquire(struct spinlock *lk)
 }
 ```
 
+#### sync lock test and set
+
 Xv6’s acquire uses the portable C library call __sync_lock_test_and_set, which boils down to the amoswap instruction.
 
 The return value of **__sync_lock_test_and_set(&lk->locked, 1)** is the old (swapped) contents of lk->locked. 
@@ -75,6 +82,28 @@ The acquire function wraps the swap in a loop, retrying (spinning) until it has 
 Once the lock is acquired, acquire records, for debugging, the CPU that acquired the lock. The lk->cpu field is protected by the lock and must only be changed while holding the lock.
 
 ![spin_acquire](./pic/spin_acquire.png)
+
+#### sync synchronize
+
+- Instruction and memory ordering
+
+  It is natural to think of programs executing in the order in which source code statements appear. Many compilers and CPUs, however, **execute code out of order to achieve higher performance**. 
+
+  If an instruction takes many cycles to complete, a CPU may issue the instruction early so that it can overlap with other instructions and avoid CPU stalls. For example, a CPU may notice that in a serial sequence of instructions A and B are not dependent on each other. The CPU may start instruction B first, either because its inputs are ready before A’s inputs, or in order to overlap execution of A and B. A compiler may perform a similar re-ordering by emitting instructions for one statement before the instructions for a statement that precedes it in the source.
+
+- Memory model
+
+  The CPU’s ordering rules are called the memory model.
+
+  Compilers and CPUs follow rules when they re-order to ensure that they **don’t change the results of correctly-written serial code**. However, the rules do allow re-ordering that **changes the results of concurrent code**, and can easily lead to incorrect behavior on multiprocessors. 
+
+- Memory barrier
+
+  To tell the hardware and compiler **not to perform such re-orderings**, xv6 uses **sync_synchronize** in both acquire and release. 
+
+  __sync_synchronize() is a memory barrier: it tells the compiler and CPU to not reorder loads or stores across the barrier. 
+
+  The barriers in xv6’s acquire and release force order in almost all cases where it matters, since xv6 uses locks around accesses to shared data. 
 
 ### release
 
@@ -127,11 +156,15 @@ Drawback of spinlocks at this situation:
 
     explanation:
 
-    1. First thread yeild the CPU while holding spinlock
-    2. The second thread get the CPU and try to acquire lock
-    3. Since first thread didn't release lock, second thread will trap in endless wait and can't acquire lock.
-    4. The second thread was waiting for first thread to release lock and keep CPU busy, the first thread has no choose to get the CPU and release lock.
-    5. Here comes a deadlock situation. 
+    - First thread yeild the CPU while holding spinlock
+
+    - The second thread get the CPU and try to acquire lock
+
+    - Since first thread didn't release lock, second thread will trap in endless wait and can't acquire lock.
+
+    - The second thread was waiting for first thread to release lock and keep CPU busy, the first thread has no choose to get the CPU and release lock.
+
+    - Here comes a deadlock situation. 
 
   - Violate the requirement that interrupts must be off while a spinlock is held.
 
@@ -194,8 +227,37 @@ releasesleep(struct sleeplock *lk)
 }
 ```
 
-## compare
+## Compare
 
 Spin-locks are best suited to short critical sections, since waiting for them wastes CPU time
 
 Sleep-locks work well for lengthy operations.
+
+## Locks and interrupt handlers
+
+### Deadlock scenario
+
+Some xv6 spinlocks protect data that is used by both threads and interrupt handlers. The interaction of spinlocks and interrupts raises a potential danger.
+
+- sys_sleep holds tickslock, and its CPU is interrupted by a timer interrupt.
+- clockintr (time interrupt handler) would try to acquire tickslock, see it was held, and wait for it to be released.
+
+In this situation, tickslock will never be released: **only sys_sleep can release it, but sys_sleep will not continue running until clockintr returns**. So the CPU will deadlock, and any code that needs either lock will also freeze.
+
+### Solution
+
+To avoid this situation, if a spinlock is used by an interrupt handler, a CPU must never hold that lock with interrupts enabled.
+
+Xv6 is more conservative: when a **CPU acquires any lock**, xv6 always **disables interrupts on that CPU**. Interrupts may still occur on other CPUs, **so an interrupt’s acquire can wait for a thread to release a spinlock; just not on the same CPU**.
+
+xv6 re-enables interrupts when a CPU holds no spinlocks; it must do a little book-keeping to cope with nested critical sections.
+
+- **acquire calls push_off** and **release calls pop_off** to track the nesting level of locks on the current CPU. 
+
+- When that **count reaches zero, pop_off restores the interrupt enable state** that existed at the start of the outermost critical section. The **intr_off and intr_on** functions **execute RISC-V instructions to disable and enable interrupts**, respectively.
+
+**push_off - intr_off - interrupt disable**
+
+**pop_off - intr_on - interrupt enable**
+
+**It is important that acquire call push_off strictly before setting lk->locked**. If the two were reversed, there would be a brief window when the lock was held with interrupts enabled, and an unfortunately timed interrupt would deadlock the system. Similarly, **it is important that release call pop_off only after releasing the lock**.
