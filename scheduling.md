@@ -109,15 +109,18 @@ Let’s follow a process through swtch into the scheduler:
   saves the current registers in old context
 
   - **saves only callee-saved registers**. caller-saved registers are saved on the stack (if needed) by the calling C code.
+  
+    notes: caller registers value may changed while cross different processes, so the running process saved it when needed. On the contrary, callee registers suppose to be not changed, so running process will consider it was not necessary to save them. But if we want to save the context, the swtch machine codes must save those callee registers, because no one else will save them. 
+  
   - It does not save the program counter. Instead, **swtch saves the ra register**, which holds the return address from which swtch was called.
-
+  
   loads registers from new context
-
+  
   - new context holds **register values saved by a previous swtch**(comes from scheduler).
   - load ra register from new context
   - load sp register from new context(aka use new thread's stack)
   - load other callee registers from new CPU context. 
-
+  
   swtch return to the address which loaded ra points to(aka the new thread previous called swtch)
 
 The new CPU context was saved by scheduler’s call to swtch. When the swtch we have been tracing returns, it returns not to sched but to scheduler (since ra register switched), and its stack pointer points at the current CPU’s scheduler stack(since sp register switched).
@@ -163,7 +166,9 @@ A different CPU might decide to run the process **after yield had set its state 
 
 A kernel thread always gives up its CPU in sched and always switches to the same location in the scheduler, which (almost) always switches to some kernel thread that previously called sched.
 
-T**here is one case when the scheduler’s call to swtch does not end up in sched**. When a new process is **first scheduled**, it begins at forkret. Forkret exists to release the p->lock; otherwise, the new process could start at usertrapret.
+Swtch almost always comes and goes between shed() and scheduler() call(except a new process first scheduled).
+
+**There is one case when the scheduler’s call to swtch does not end up in sched**. When a new process is **first scheduled**, it begins at forkret. Forkret exists to release the p->lock; otherwise, the new process could start at usertrapret.
 
 ### Scheduler function
 
@@ -282,12 +287,6 @@ The function myproc() returns the struct proc pointer for the process that is ru
 
 - myproc() disables interrupts, invokes mycpu, fetches the current process pointer (c->proc) out of the struct cpu, and then enables interrupts. 
 - **The return value of myproc() is safe to use even if interrupts are enabled**: if a timer interrupt moves the calling process to a different CPU, its struct proc pointer will stay the same.
-
-### Sleep and wakeup
-
-#### mechanism
-
-Scheduling and locks help **conceal the existence of one process from another**, but so far we have no abstractions that help processes intentionally interact. Many mechanisms have been invented to solve this problem. Xv6 uses one called **sleep and wakeup**, **which allow one process to sleep waiting for an event and another process to wake it up once the event has happened**. Sleep and wakeup are often called sequence coordination or conditional synchronization mechanisms.
 
 
 
