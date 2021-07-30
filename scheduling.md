@@ -190,7 +190,7 @@ A different CPU might decide to run the process **after yield had set its state 
 Lock flows during scheduling like this:
 
 | Event                                | acquire p->lock | release p->lock |
-| ------------------------------------ | --------------- | --------------- |
+| :----------------------------------- | :-------------- | :-------------- |
 | Give up CPU (yield)                  | yield --> sched | scheduler       |
 | RUNNABLE -> RUNNING (not first proc) | scheduler       | sched --> yield |
 | RUNNABLE -> RUNNING (first proc)     | scheduler       | forkret         |
@@ -199,8 +199,8 @@ Here raises a question: Does the same process lock is acquired and released?
 
 The answer is Yes, and it lies on the myproc() function. The process flows like below:
 
-| Event                                | p in acquire p->lock              | p in release p->lock               |
-| ------------------------------------ | --------------------------------- | ---------------------------------- |
+| Event                                | acquire p->lock              | release p->lock               |
+| :----------------------------------- | :-------------------------------- | :--------------------------------- |
 | Give up CPU (yield)                  | p = myproc()                      | p = proc[i] <br>cpu->proc = p</br> |
 | RUNNABLE -> RUNNING (not first proc) | p = proc[i]<br>cpu->proc = p</br> | p = myproc()                       |
 | RUNNABLE -> RUNNING (first proc)     | p = proc[i]<br>cpu->proc = p</br> | p = myproc()                       |
