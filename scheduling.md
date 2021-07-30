@@ -72,29 +72,23 @@ Swtch takes two arguments: struct context *old and struct context *new. **It sav
 
 ```mermaid
 flowchart TB
-	t0[time interrupt]
-	t1[usertrap]
-	t0 --> t1
-	
 	subgraph s0[yield]
 	t8[acquire lock]
 	t2[set state RUNNABLE]
 	t8 --> t2
 	
 	subgraph s1[sched]
-	t3[check current proc lock]
-	t4[check current CPU push_off depth = 1]
-	t5[check current proc state NOT RUNNING]
-	t6[check current device interrupt disable]
+	t3[check hold p->lock]
+	t4[check CPU push_off depth = 1]
+	t5[check p->state != RUNNING]
+	t6[check device interrupt disable]
 	t3 --> t4 --> t5 --> t6
-	t6 --> t7[swtch old proc context to new CPU context]
+	t6 --> t7[swtch p->context and cpu->context]
 	end
 	
 	t9[release lock]
 	t2 --> s1 --> t9
 	end
-	
-	t1 --> s0
 	
 ```
 
@@ -112,7 +106,7 @@ Let’s follow a process through swtch into the scheduler:
   
     notes: caller registers value may changed while cross different processes, so the running process saved it when needed. On the contrary, callee registers suppose to be not changed, so running process will consider it was not necessary to save them. But if we want to save the context, the swtch machine codes must save those callee registers, because no one else will save them. 
   
-  - It does not save the program counter. Instead, **swtch saves the ra register**, which holds the return address from which swtch was called.
+  - It does not save the program counter(PC will update anyway). Instead, **swtch saves the ra register**, which holds the return address from which swtch was called.
   
   loads registers from new context
   
@@ -128,6 +122,39 @@ The new CPU context was saved by scheduler’s call to swtch. When the swtch we 
 ## Scheduling
 
 **The scheduler exists in the form of a special thread per CPU, each running the scheduler function**. This function is in charge of choosing which process to run next. The scheduler function continues the for loop, finds a process to run, switches to it, and the cycle repeats.
+
+The big picture:
+
+```mermaid
+flowchart TB
+	subgraph s0[scheduler loop]
+	t0[intr_on]
+	t1[acquire p->lock]
+	t2[p->state = RUNNING]
+	t3[cpu->proc = p]
+	t4[swtch cpu->context and p->context]
+	t5[cpu->proc = 0]
+	t6[release p->lock]
+	t0 --"traverse proc[NPROC]"--> t1
+	t1 --state=RUNNABLE--> t2
+	t2 --> t3 --> t4
+	t5 --> t6
+	t4 .- t5
+	end
+	
+	subgraph s1[sched called in yield]
+	t12[yield::acquire p->lock]
+	t13[yield::p->state=RUNNABLE]
+	t7[check lock and interrupt]
+	t11[swtch p->context and cpu->context]
+	t15[yeild::release p->lock]
+	t12 --> t13 --> t7
+	t7  --> t11 .- t15
+	end
+	
+	t11 --> t5
+	t4 --> t15
+```
 
 ### Give up CPU
 
@@ -150,25 +177,45 @@ The new CPU context was saved by scheduler’s call to swtch. When the swtch we 
   - Swtch returns on the scheduler’s stack as though **scheduler**’s swtch had returned.
   
 
-### Hold and release lock cross functions
+### Lock cross sched and scheduler
 
-Xv6 holds p->lock across calls to swtch: the caller of swtch must already hold the lock, and control of the lock passes to the switched-to code(usually scheduler function). 
+Xv6 holds p->lock across calls to swtch: the caller of swtch must already hold the lock, and control of the lock passes to the switched-to code(usually scheduler function).  
 
-**This convention is unusual with locks**; usually the thread that acquires a lock is also responsible for releasing the lock, which makes it easier to reason about correctness.
-
-**The reason**: p->lock protects invariants on the process’s state and context fields that are not true while executing in swtch.(aka must acquire lock before swtch and release after swtch return)
+**The reason**: p->lock protects invariants on the process’s state and context fields that are not true while executing in swtch.
 
 **If Not Scenario** (if p->lock were not held during swtch): 
 
 A different CPU might decide to run the process **after yield had set its state to RUNNABLE, but before swtch caused it to stop using its own kernel stack**. The result would be two CPUs running on the same stack, which cannot be right.
 
+Lock flows during scheduling like this:
+
+| Event                                | acquire p->lock | release p->lock |
+| ------------------------------------ | --------------- | --------------- |
+| Give up CPU (yield)                  | yield --> sched | scheduler       |
+| RUNNABLE -> RUNNING (not first proc) | scheduler       | sched --> yield |
+| RUNNABLE -> RUNNING (first proc)     | scheduler       | forkret         |
+
+Here raises a question: Does the same process lock is acquired and released?
+
+The answer is Yes, and it lies on the myproc() function. The process flows like below:
+
+| Event                                | p in acquire p->lock              | p in release p->lock               |
+| ------------------------------------ | --------------------------------- | ---------------------------------- |
+| Give up CPU (yield)                  | p = myproc()                      | p = proc[i] <br>cpu->proc = p</br> |
+| RUNNABLE -> RUNNING (not first proc) | p = proc[i]<br>cpu->proc = p</br> | p = myproc()                       |
+| RUNNABLE -> RUNNING (first proc)     | p = proc[i]<br>cpu->proc = p</br> | p = myproc()                       |
+
+Either acquire or release lock, the lock belongs to myproc() or cpu->proc.
+
+myproc() returns cpu->proc, so the locked and unlocked process must be the same.
+
 ### Swtch routine
 
 A kernel thread always gives up its CPU in sched and always switches to the same location in the scheduler, which (almost) always switches to some kernel thread that previously called sched.
 
-Swtch almost always comes and goes between shed() and scheduler() call(except a new process first scheduled).
+Swtch almost always comes and goes between sched() and scheduler() call (except a new process first scheduled). **Scheduling happens between sched swtch and scheduler swtch.**
 
-**There is one case when the scheduler’s call to swtch does not end up in sched**. When a new process is **first scheduled**, it begins at forkret. Forkret exists to release the p->lock; otherwise, the new process could start at usertrapret.
+**There is one case when the scheduler’s call to swtch does not end up in sched**. When a new process is **first scheduled**(no process was about to yield CPU), it begins at forkret. **Forkret exists to release the p->lock**; otherwise, the new process could start at usertrapret.
 
 ### Scheduler function
 
@@ -245,6 +292,17 @@ struct cpu {
 
 The function mycpu() returns a pointer to the current CPU’s struct cpu. RISC-V numbers its CPUs, giving each a **hartid**. Xv6 ensures that **each CPU’s hartid is stored in that CPU’s tp(Thread pointer) register while in the kernel**. This allows mycpu to use tp to index an array of cpu structures to find the right one.
 
+```c++
+// Return this CPU's cpu struct.
+// Interrupts must be disabled.
+struct cpu*
+mycpu(void) {
+  int id = cpuid();
+  struct cpu *c = &cpus[id];
+  return c;
+}
+```
+
 Ensuring that a CPU’s tp always holds the CPU’s hartid is a little involved.
 
 - mstart sets the tp register early in the CPU’s boot sequence, while still in machine mode.
@@ -288,5 +346,14 @@ The function myproc() returns the struct proc pointer for the process that is ru
 - myproc() disables interrupts, invokes mycpu, fetches the current process pointer (c->proc) out of the struct cpu, and then enables interrupts. 
 - **The return value of myproc() is safe to use even if interrupts are enabled**: if a timer interrupt moves the calling process to a different CPU, its struct proc pointer will stay the same.
 
-
-
+```c++
+// Return the current struct proc *, or zero if none.
+struct proc*
+myproc(void) {
+  push_off();
+  struct cpu *c = mycpu();
+  struct proc *p = c->proc;
+  pop_off();
+  return p;
+}
+```
