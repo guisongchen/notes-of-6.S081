@@ -1,6 +1,14 @@
-# Sleep and wakeup
-
-[toc]
+- [Conditional synchronization](#conditional-synchronization)
+  - [Semaphore](#semaphore)
+  - [Busy waiting mechanism](#busy-waiting-mechanism)
+  - [Sleep and wakeup mechanism](#sleep-and-wakeup-mechanism)
+  - [Condition lock](#condition-lock)
+- [Code](#code)
+  - [Sleep and wakeup](#sleep-and-wakeup)
+  - [Pipes](#pipes)
+  - [Wait](#wait)
+  - [Exit](#exit)
+  - [Kill](#kill)
 
 ## Conditional synchronization
 
@@ -24,24 +32,7 @@ struct semaphore {
 
 ### Busy waiting mechanism
 
-```mermaid
-graph TB
-	subgraph P
-	t3[polling s->count]
-	t4[acquire s->lock]
-	t5[s->count--]
-	t6[release s->lock]
-	t3 --s->count!=0--> t4 --> t5 --> t6
-	t3 --s->count==0--> t3
-	end
-	
-	subgraph V
-	t0[acquire s->lock]
-	t1[s->count++]
-	t2[release s->lock]
-	t0 --> t1 --> t2
-	end
-```
+![busy_wait](./pic/busy_wait.png)
 
 **Drawback**: If the producer acts rarely, the consumer will spend most of its time spinning in the while loop hoping for a non-zero count (busy waiting). 
 
@@ -53,26 +44,7 @@ Sleep(chan) sleeps on the arbitrary value chan, called the wait channel. Sleep p
 
 Wakeup(chan) wakes all processes sleeping on chan (if any), causing their sleep calls to return. If no processes are waiting on chan, wakeup does nothing.
 
-```mermaid
-graph TB
-	subgraph P
-	t3[polling s->count]
-	t8[<font color='red'>sleep s</font>]
-	t4[acquire s->lock]
-	t5[s->count--]
-	t6[release s->lock]
-	t3 --s->count!=0--> t4 --> t5 --> t6
-	t3 --s->count==0--> t8
-	end
-	
-	subgraph V
-	t0[acquire s->lock]
-	t1[s->count++]
-	t7[<font color='red'>wakeup s</font>]
-	t2[release s->lock]
-	t0 --> t1 --> t7 --> t2
-	end
-```
+![sleep_and_wakeup](./pic/sleep_and_wakeup.png)
 
 P now gives up the CPU instead of spinning, which solves busy waiting.
 
@@ -92,26 +64,7 @@ We’ll fix the preceding scheme by changing sleep’s interface: **the caller m
 
 The fact that P holds s->lock prevents V from trying to wake it up between P’s check of c->count and its call to sleep. Note, however, that **we need sleep to atomically release s->lock and put the consuming process to sleep**.
 
-```mermaid
-graph TB
-	subgraph P
-	t3[polling s->count]
-	t8[<font color='red'>sleep s with s->lock</font>]
-	t4[acquire s->lock]
-	t5[s->count--]
-	t6[release s->lock]
-	t3 --s->count!=0--> t4 --> t5 --> t6
-	t3 --s->count==0--> t8
-	end
-	
-	subgraph V
-	t0[acquire s->lock]
-	t1[s->count++]
-	t7[<font color='red'>wakeup s</font>]
-	t2[release s->lock]
-	t0 --> t1 --> t7 --> t2
-	end
-```
+![sleep_with_lock](./pic/sleep_with_lock.png)
 
 ## Code
 

@@ -1,6 +1,12 @@
-# Scheduling
-
-[toc]
+- [Why need scheduling](#why-need-scheduling)
+- [Multiplexing](#multiplexing)
+- [Context switching](#context-switching)
+- [Scheduling](#scheduling)
+  - [Give up CPU](#give-up-cpu)
+  - [Lock cross sched and scheduler](#lock-cross-sched-and-scheduler)
+  - [Swtch routine](#swtch-routine)
+  - [Scheduler function](#scheduler-function)
+  - [mycpu and myproc](#mycpu-and-myproc)
 
 ## Why need scheduling
 
@@ -70,27 +76,7 @@ Swtch takes two arguments: struct context *old and struct context *new. **It sav
 - Now swtch restores registers from the new context, which holds register values saved by a previous swtch. 
 - When swtch returns, it returns to the instructions pointed to by the restored ra register, that is, the instruction from which the new thread previously called swtch. In addition, it returns on the new thread’s stack.
 
-```mermaid
-flowchart TB
-	subgraph s0[yield]
-	t8[acquire lock]
-	t2[set state RUNNABLE]
-	t8 --> t2
-	
-	subgraph s1[sched]
-	t3[check hold p->lock]
-	t4[check CPU push_off depth = 1]
-	t5[check p->state != RUNNING]
-	t6[check device interrupt disable]
-	t3 --> t4 --> t5 --> t6
-	t6 --> t7[swtch p->context and cpu->context]
-	end
-	
-	t9[release lock]
-	t2 --> s1 --> t9
-	end
-	
-```
+![yeild](./pic/yeild.png)
 
 Let’s follow a process through swtch into the scheduler:
 
@@ -125,36 +111,7 @@ The new CPU context was saved by scheduler’s call to swtch. When the swtch we 
 
 The big picture:
 
-```mermaid
-flowchart TB
-	subgraph s0[scheduler loop]
-	t0[intr_on]
-	t1[acquire p->lock]
-	t2[p->state = RUNNING]
-	t3[cpu->proc = p]
-	t4[swtch cpu->context and p->context]
-	t5[cpu->proc = 0]
-	t6[release p->lock]
-	t0 --"traverse proc[NPROC]"--> t1
-	t1 --state=RUNNABLE--> t2
-	t2 --> t3 --> t4
-	t5 --> t6
-	t4 .- t5
-	end
-	
-	subgraph s1[sched called in yield]
-	t12[yield::acquire p->lock]
-	t13[yield::p->state=RUNNABLE]
-	t7[check lock and interrupt]
-	t11[swtch p->context and cpu->context]
-	t15[yeild::release p->lock]
-	t12 --> t13 --> t7
-	t7  --> t11 .- t15
-	end
-	
-	t11 --> t5
-	t4 --> t15
-```
+![scheduler](./pic/scheduler.png)
 
 ### Give up CPU
 
