@@ -21,7 +21,7 @@ The purpose of a file system is to organize and store data. File systems typical
 
 The xv6 file system implementation is organized in seven layers.
 
-![layer](C:\Users\CCC\Desktop\xv6\notes-of-6.S081\pic\layers_of_file_system.png)
+![layer](.\pic\layers_of_file_system.png)
 
 1. The disk layer reads and writes blocks on an virtio hard drive. 
 2. The buffer cache layer caches disk blocks and synchronizes access to them, making sure that only one kernel process at a time can modify the data stored in any particular block. 
@@ -35,7 +35,7 @@ The xv6 file system implementation is organized in seven layers.
 
 The file system must have a plan for where it stores inodes and content blocks on the disk. To do so, xv6 divides the disk into several sections.
 
-![structure](C:\Users\CCC\Desktop\xv6\notes-of-6.S081\pic\structure_of_file_system.png)
+![structure](.\pic\structure_of_file_system.png)
 
 - The file system does not use block 0 (it holds the boot sector). 
 
