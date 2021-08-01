@@ -1,4 +1,10 @@
-## Buffer cache layer
+- [Purpose](#purpose)
+- [Structure](#structure)
+- [Code](#code)
+  - [binit](#binit)
+  - [bread](#bread)
+  - [bwrite](#bwrite)
+  - [brelse](#brelse)
 
 ## Purpose
 
@@ -101,15 +107,7 @@ bcache.head.prev = &bcache.head;
 bcache.head.next = &bcache.head;
 ```
 
-
-
-```mermaid
-graph LR
-	t0[head]
-	t1[head]
-	t1 --prev--> t0
-	t0 --next--> t1
-```
+![](./pic/bcache0.png)
 
 
 
@@ -119,16 +117,7 @@ b->next = bcache.head.next;
 b->prev = &bcache.head;
 ```
 
-
-
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 --prev--> t2[head]
-	t2 --next--> t1
-	t1 --prev--> t2
-```
+![](./pic/bcache1.png)
 
 
 
@@ -137,115 +126,24 @@ graph LR
 bcache.head.next->prev = b;
 ```
 
-
-
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 --prev--> t2[head]
-	t2 --next--> t1
-	t1 -.prev.-> t2
-	
-	t1 --prev--> t0
-```
+![](./pic/bcache2.png)
 
 ```c++
 // update head next pointer
 bcache.head.next = b;
 ```
 
-
-
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 --prev--> t2[head]
-	t2 -.next.-> t1
-	t1 -.prev.-> t2
-	
-	t1 --prev--> t0
-	t2 --next--> t0
-```
+![](./pic/bcache3.png)
 
 Remove invalid pointer(dot line), finish initializing b[0].
 
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 --prev--> t1[head]
-	
-	t1 --prev--> t0
-	t1 --next--> t0
-```
+![](./pic/bcache4.png)
 
 Add a new node b[1] at the front of buffer array. Repeat all above steps.
 
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 --prev--> t1[head]
-	
-	t1 --prev--> t0
-	t1 --next--> t0
-	
-	t2["b[1]"]
-	t2 --next--> t0
-	t2 --prev--> t1
-```
+![](./pic/bcache5.png)
 
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 -.prev.-> t1[head]
-	
-	t1 --prev--> t0
-	t1 --next--> t0
-	
-	t2["b[1]"]
-	t2 --next--> t0
-	t2 --prev--> t1
-	
-	t0 --prev--> t2
-```
-
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	t0 -.prev.-> t1[head]
-	
-	t1 --prev--> t0
-	t1 -.next.-> t0
-	
-	t2["b[1]"]
-	t2 --next--> t0
-	t2 --prev--> t1
-	
-	t0 --prev--> t2
-	t1 --next--> t2
-```
-
-```mermaid
-graph LR
-	t0["b[0]"]
-	t0 --next--> t1[head]
-	%%t0 -.prev.-> t1[head]
-	
-	t1 --prev--> t0
-	%%t1 -.next.-> t0
-	
-	t2["b[1]"]
-	t2 --next--> t0
-	t2 --prev--> t1
-	
-	t0 --prev--> t2
-	t1 --next--> t2
-```
+![](./pic/bcache6.png)
 
 Important observations:
 
@@ -314,32 +212,7 @@ Bget scans the buffer list for a buffer with the given device and sector numbers
 
 It is important that **there is at most one cached buffer per disk sector**, to ensure that readers see writes, and because the file system uses locks on buffers for synchronization. 
 
-```mermaid
-flowchart LR
-	t0[acquire bcache.lock]
-	
-	subgraph s0[search cached buffers]
-	t1["traverse at head.next (MRU)"]
-	t2[b->refcnt++]
-	t3[release bcache.lock]
-	t4[acquiresleep b->lock]
-	t5[return cached buffer]
-	t1 --dev and blockno match--> t2 --> t3 --> t4 --> t5
-	t1 --not match--> t1
-	end
-	
-	subgraph s1[recycle LRU unused buffer]
-	t6["traverse at head.prev (LRU)"]
-	t7[set buffer struct]
-	t8[release bcache.lock]
-	t9[acquiresleep b->lock]
-	t10[return recycled buffer]
-	t6 --b.refcnt=0--> t7 --> t8 --> t9 --> t10
-	t6 --b.refcnt!=0--> t6
-	end
-	
-	t0 --> s0 --> s1
-```
+![bget](./pic/bget.png)
 
 Bget ensures this invariant by holding the bache.lock continuously from the first loop’s check of whether the block is cached through the second loop’s declaration that the block is now cached (by setting dev, blockno, and refcnt). This causes the check for a block’s presence and (if not present) the designation of a buffer to hold the block to be atomic.
 
@@ -370,107 +243,28 @@ Step by step illustrations:
 
 **Before brelse**:  head  ==>  b->prev  ==>  b  ==>  b->next  ==> head 
 
-```mermaid
-graph LR
-	t0[b]
-	t1[b->next]
-	t2[b->prev]
-	t3[head]
-	t0 --next--> t1
-	t1 --prev--> t0
-	t2 --next--> t0
-	t0 --prev--> t2
-	t3 --next--> t2
-	t2 --prev--> t3
-	t3 --prev--> t1
-	t1 --next--> t3
-```
+![](./pic/bcache7.png)
 
 ```c++
 b->next->prev = b->prev;
 b->prev->next = b->next;
 ```
 
-
-
-```mermaid
-graph LR
-	t0[b]
-	t1[b->next]
-	t2[b->prev]
-	t3[head]
-	t0 --next--> t1
-	%%t1 -.prev.-> t0
-	%%t2 -.next.-> t0
-	t0 --prev--> t2
-	t3 --next--> t2
-	t2 --prev--> t3
-	t3 --prev--> t1
-	t1 --next--> t3
-	
-	t1 --prev--> t2
-	t2 --next--> t1
-```
+![](./pic/bcache8.png)
 
 ```c++
 b->next = bcache.head.next;
 b->prev = &bcache.head;
 ```
 
-
-
-
-
-```mermaid
-graph LR
-	t0[b]
-	t1[b->next]
-	t2[b->prev]
-	t3[head]
-	%%t0 -.next.-> t1
-	%%t1 -.prev.-> t0
-	%%t2 -.next.-> t0
-	%%t0 -.prev.-> t2
-	t3 --next--> t2
-	t2 --prev--> t3
-	t3 --prev--> t1
-	t1 --next--> t3
-	
-	t1 --prev--> t2
-	t2 --next--> t1
-	t0 --next--> t2
-	t0 --prev--> t3
-```
+![](./pic/bcache9.png)
 
 ```c++
 bcache.head.next->prev = b;
 bcache.head.next = b;
 ```
 
-
-
-```mermaid
-graph LR
-	t0[b]
-	t1[b->next]
-	t2[b->prev]
-	t3[head]
-	%%t0 -.next.-> t1
-	%%t1 -.prev.-> t0
-	%%t2 -.next.-> t0
-	%%t0 -.prev.-> t2
-	%%t3 -.next.-> t2
-	%%t2 -.prev.-> t3
-	t3 --prev--> t1
-	t1 --next--> t3
-	
-	t1 --prev--> t2
-	t2 --next--> t1
-	t0 --next--> t2
-	t0 --prev--> t3
-	t2 --prev--> t0
-	t3 --next--> t0
-```
+![](./pic/bcache10.png)
 
 **Before brelse**:  head  ==>  b->prev  ==>  b  ==>  b->next  ==> head 
 
