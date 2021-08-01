@@ -9,4 +9,6 @@ All the raw materials come from [MIT 6.S081](https://pdos.csail.mit.edu/6.828/20
 [Interrupts and device drivers](https://github.com/guisongchen/notes-of-6.S081/blob/main/interrupts_and_device_drivers.md)  
 [Spinlock and Sleeplock](https://github.com/guisongchen/notes-of-6.S081/blob/main/spinlock%20and%20sleeplock.md)  
 [Scheduling](https://github.com/guisongchen/notes-of-6.S081/blob/main/scheduling.md)  
-[Sleep and wakeup](https://github.com/guisongchen/notes-of-6.S081/blob/main/sleep_and_wakeup.md)
+[Sleep and wakeup](https://github.com/guisongchen/notes-of-6.S081/blob/main/sleep_and_wakeup.md)  
+[File system:overview](https://github.com/guisongchen/notes-of-6.S081/blob/main/file%20system%20overview.md)  
+[File system:buffer cache layer](https://github.com/guisongchen/notes-of-6.S081/blob/main/buffer%20cache%20layer%20of%20file%20system.md)
