@@ -69,6 +69,15 @@ It consists of **a header block followed by a sequence of updated block copies**
 - **The header block** contains an array of sector numbers, one for each of the logged blocks, and the count of log blocks. The count in the header block on disk is either zero, indicating that there is no transaction in the log, or non-zero, indicating that the log contains a complete committed transaction with the indicated number of logged blocks. 
 - **Xv6 writes the header block when a transaction commits**, but not before, and **sets the count to zero after copying the logged blocks to the file system**. Thus a crash midway through a transaction will result in a count of zero in the log’s header block; a crash after a commit will result in a non-zero count.
 
+```c++
+// Contents of the header block, used for both the on-disk header block
+// and to keep track in memory of logged block# before commit.
+struct logheader {
+  int n;
+  int block[LOGSIZE];
+};
+```
+
 Each system call’s code indicates the start and end of the sequence of writes that must be atomic with respect to crashes. To allow concurrent execution of file-system operations by different processes, **the logging system can accumulate the writes of multiple system calls into one transaction**. Thus **a single commit may involve the writes of multiple complete system calls**. 
 
 To avoid splitting a system call across transactions, **the logging system only commits when no file-system system calls are underway**.
@@ -103,6 +112,52 @@ log_write(bp);
 end_op();
 ```
 
+#### initlog
+
+```c++
+struct log {
+  struct spinlock lock;
+  int start;
+  int size;
+  int outstanding; // how many FS sys calls are executing.
+  int committing;  // in commit(), please wait.
+  int dev;
+  struct logheader lh;
+};
+```
+
+Set log information according to superlock (where log lives).
+
+```c++
+struct superblock {
+  uint magic;        // Must be FSMAGIC
+  uint size;         // Size of file system image (blocks)
+  uint nblocks;      // Number of data blocks
+  uint ninodes;      // Number of inodes.
+  uint nlog;         // Number of log blocks
+  uint logstart;     // Block number of first log block
+  uint inodestart;   // Block number of first inode block
+  uint bmapstart;    // Block number of first free map block
+};
+```
+
+Initialize log start, size and dev information. initlog is called from fsinit during boot before the first user process runs.
+
+```c++
+void
+initlog(int dev, struct superblock *sb)
+{
+  if (sizeof(struct logheader) >= BSIZE)
+    panic("initlog: too big logheader");
+
+  initlock(&log.lock, "log");
+  log.start = sb->logstart;
+  log.size = sb->nlog;
+  log.dev = dev;
+  recover_from_log();
+}
+```
+
 #### begin_op
 
 **begin_op waits until the logging system is not currently committing, and until there is enough unreserved log space to hold the writes from this call.** 
@@ -131,6 +186,8 @@ begin_op(void)
   }
 }
 ```
+
+**In brief, waiting until get a chance to increment log.outstanding (aka log a syscall write operation).**
 
 #### log_write
 
@@ -184,25 +241,17 @@ log_write(struct buf *b)
 }
 ```
 
-log_write notices when **a block is written multiple times during a single transaction, and allocates that block the same slot in the log**. This optimization is often called **absorption**. 
+log_write notices when **a block is written multiple times during a single transaction, and allocates that block the same slot in the log**. This optimization is often called **absorption**. (simply do nothing and return in above codes)
 
 Why needs absorption?
 
 It is common that, for example, the disk block containing inodes of several files is written several times within a transaction. By absorbing several disk writes into one, the file system can **save log space** and can **achieve better performance** because only one copy of the disk block must be written to disk.
 
+**In short, if to be written buffer already logged, return. If not, add a new log block, pin this buffer and increase block count.** 
+
 #### end_op
 
-end_op first decrements the count of outstanding system calls. If the count is now zero, it commits the current transaction by calling commit(). There are four stages in this process:
-
-1. write_log() copies each block modified in the transaction from the buffer cache to its slot in the log on disk. 
-
-2. **write_head() writes the header block to disk**: **this is the commit point, and a crash after the write will result in recovery replaying the transaction’s writes from the log.** 
-
-3. install_trans reads each block from the log and writes it to the proper place in the file system. 
-
-4. Finally end_op writes the log header with a count of zero.
-
-   this has to happen before the next transaction starts writing logged blocks, so that a crash doesn’t result in recovery using one transaction’s header with the subsequent transaction’s logged blocks.
+end_op first decrements the count of outstanding system calls. If the count is now zero, it commits the current transaction by calling commit(). 
 
 ```c++
 // called at the end of each FS system call.
@@ -235,6 +284,32 @@ end_op(void)
     log.committing = 0;
     wakeup(&log);
     release(&log.lock);
+  }
+}
+```
+
+There are four stages in the commit() process:
+
+1. write_log() copies each block modified in the transaction from the buffer cache to its slot in the log on disk. 
+
+2. **write_head() writes the header block to disk**: **this is the commit point, and a crash after the write will result in recovery replaying the transaction’s writes from the log.** 
+
+3. install_trans reads each block from the log and writes it to the proper place in the file system. 
+
+4. Finally end_op writes the log header with a count of zero.
+
+   this has to happen before the next transaction starts writing logged blocks, so that a crash doesn’t result in recovery using one transaction’s header with the subsequent transaction’s logged blocks.
+
+```c++
+static void
+commit()
+{
+  if (log.lh.n > 0) {
+    write_log();     // Write modified blocks from cache to log
+    write_head();    // Write header to disk -- the real commit
+    install_trans(0); // Now install writes to home locations
+    log.lh.n = 0;
+    write_head();    // Erase the transaction from the log
   }
 }
 ```
