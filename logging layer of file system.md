@@ -110,7 +110,7 @@ log_write(bp);
 end_op();
 ```
 
-#### Sequence diagram
+#### The big picture
 
 ```mermaid
 sequenceDiagram
@@ -153,6 +153,37 @@ sequenceDiagram
 **In memory**: buffer cache, buffer bp, strcuct log.
 
 **In disk**: super block, log block, data block.
+
+Go through logging process from block perspective:
+
+```mermaid
+graph TB
+	t0[data blocks at disk]
+	t1[buffer cache in memory]
+	t2[required block buffer]
+	t0 --virtio_disk_rw--> t1
+	t1 --bread--> t2
+	
+	t3[modified block buffer]
+	t2 --modify as syscall needs--> t3
+	t4[store blockno in log header block array]
+	t5[pin blockno in buffer cache]
+	t10[release after write_log]
+	t3 --log_write--> t4 & t5
+	t5 --brelse--> t10
+	
+	t6["write cached log blocks to disk(log blocks)"]
+	t7["<font color='red'>write in-memory log header to disk(superblock)</font>"]
+	t8["write log blocks to data blocks(home location)"]
+	t9[erase transaction from log]
+	t4 --write_log--> t6
+	t6 --write_head--> t7
+	t7 --install_trans--> t8
+	t8 --"set log header count=0 and write_head"--> t9
+	
+```
+
+**The real commit happens when writes in-memory log header to in-disk super block.**
 
 #### initlog
 
@@ -370,6 +401,3 @@ recover_from_log(void)
   write_head(); // clear the log
 }
 ```
-
-​	
-
