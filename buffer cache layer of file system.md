@@ -207,8 +207,24 @@ Bget scans the buffer list for a buffer with the given device and sector numbers
 - If there is such a buffer, bget acquires the sleep-lock for the buffer. Bget then **returns the locked buffer.**
 
 - If there is no cached buffer for the given sector, bget must make one, possibly **reusing a buffer** that held a different sector.
-  - It scans the buffer list a second time, **looking for a buffer that is not in use** (b->refcnt = 0); any such buffer can be used. 
-  - Bget edits the buffer metadata to record the new device and sector number and acquires its sleep-lock. Note that the assignment **b->valid = 0 ensures that bread will read the block data from disk rather than incorrectly using the buffer’s previous contents**.
+  - It scans the buffer list a second time, **looking for a buffer that is not in use** (b->refcnt = 0); any such buffer can be used. (<font color='red'>**b->valid = 1**</font>)
+  - Bget edits the buffer metadata to record the new device and sector number and acquires its sleep-lock. Note that the assignment **<font color='red'>b->valid = 0</font> ensures that bread will read the block data from disk rather than incorrectly using the buffer’s previous contents**.
+
+```c++
+// Return a locked buf with the contents of the indicated block.
+struct buf*
+bread(uint dev, uint blockno)
+{
+  struct buf *b;
+
+  b = bget(dev, blockno);
+  if(!b->valid) {
+    virtio_disk_rw(b, 0);
+    b->valid = 1;
+  }
+  return b;
+}
+```
 
 It is important that **there is at most one cached buffer per disk sector**, to ensure that readers see writes, and because the file system uses locks on buffers for synchronization. 
 
