@@ -1,6 +1,13 @@
-## Logging layer
-
-[toc]
+- [Crash recovery](#crash-recovery)
+- [Solution](#solution)
+- [Log design](#log-design)
+- [Code](#code)
+  - [The big picture](#the-big-picture)
+  - [initlog](#initlog)
+  - [begin_op](#begin_op)
+  - [log_write](#log_write)
+  - [end_op](#end_op)
+  - [recover_from_log](#recover_from_log)
 
 ### Crash recovery
 
@@ -24,21 +31,7 @@ An xv6 system call **does not directly write the on-disk file system data struct
 3. At that point the system call copies the writes to the on-disk file system data structures. 
 4. After those writes have completed, the system call erases the log on disk.
 
-```mermaid
-graph TB
-	subgraph syscall writes operation
-	t0[description of disk write 0]
-	t1[description of disk write k]
-	t2[description of disk write n]
-	t3[log on the disk]
-	t4[commit operation complete record]
-	t5[write files on disk]
-	t6[erase log on disk]
-	t0 & t1 & t2 --start logging--> t3
-	t3 --finish logging--> t4
-	t4 --start writing--> t5 --finsh writing--> t6
-	end
-```
+![crash_solution](./pic/crash_solution.png)
 
 If the system should crash and reboot, the file-system code recovers from the crash as follows, **before running any processes**. 
 
@@ -112,43 +105,7 @@ end_op();
 
 #### The big picture
 
-```mermaid
-sequenceDiagram
-    participant data as data block
-    participant cache as buffer cache
-    participant buf as buffer bp
-    %%participant mdf as modified bp
-    participant log as struct log
-    participant lgblk as log block
-    participant sup as super block
-
-	Note left of buf: begin_op()
-    buf ->>+ cache: bget(dev, blockno)
-    cache ->>- buf: locked buffer bp
-    
-    alt bp->valid=0
-    buf ->>+ data: virtio_disk_rw
-    data ->>- buf: bp->valid=1
-    end
-    
-    Note left of buf: bp=bread(..)
-    
-    buf ->> buf: modify buffer data
-    Note right of buf: bp->data[..]=..
-   	
-   	alt log absorbtion
-    buf ->> log: lg.lh.block[i]=bp->blockno
-    end
-    log ->> cache: pin bp in cache
-    Note left of log: log_write(bp)
-    
-    log ->> lgblk: write_log()<br/>modified buf: cache->log
-    lgblk ->> sup: write_head()<br/>write log header
-    lgblk ->> data: install_trans()
-    lgblk ->> sup: write_head()<br>erase transaction
-    
-    Note left of sup: end_op()
-```
+![sequence](./pic/log_sequence.png)
 
 **In memory**: buffer cache, buffer bp, strcuct log.
 
@@ -156,32 +113,7 @@ sequenceDiagram
 
 Go through logging process from block perspective:
 
-```mermaid
-graph TB
-	t0[data blocks at disk]
-	t1[buffer cache in memory]
-	t2[required block buffer]
-	t0 --virtio_disk_rw--> t1
-	t1 --bread--> t2
-	
-	t3[modified block buffer]
-	t2 --modify as syscall needs--> t3
-	t4[store blockno in log header block array]
-	t5[pin blockno in buffer cache]
-	t10[release after write_log]
-	t3 --log_write--> t4 & t5
-	t5 --brelse--> t10
-	
-	t6["write cached log blocks to disk(log blocks)"]
-	t7["<font color='red'>write in-memory log header to disk(superblock)</font>"]
-	t8["write log blocks to data blocks(home location)"]
-	t9[erase transaction from log]
-	t4 --write_log--> t6
-	t6 --write_head--> t7
-	t7 --install_trans--> t8
-	t8 --"set log header count=0 and write_head"--> t9
-	
-```
+![log_diagram](./pic/log_diagram.png)
 
 **The real commit happens when writes in-memory log header to in-disk super block.**
 
