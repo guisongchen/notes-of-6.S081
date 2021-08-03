@@ -40,8 +40,6 @@ graph TB
 	end
 ```
 
-
-
 If the system should crash and reboot, the file-system code recovers from the crash as follows, **before running any processes**. 
 
 - If the log is marked as containing a complete operation, then the recovery code copies the writes to where they belong in the on-disk file system. 
@@ -111,6 +109,50 @@ log_write(bp);
 ...
 end_op();
 ```
+
+#### Sequence diagram
+
+```mermaid
+sequenceDiagram
+    participant data as data block
+    participant cache as buffer cache
+    participant buf as buffer bp
+    %%participant mdf as modified bp
+    participant log as struct log
+    participant lgblk as log block
+    participant sup as super block
+
+	Note left of buf: begin_op()
+    buf ->>+ cache: bget(dev, blockno)
+    cache ->>- buf: locked buffer bp
+    
+    alt bp->valid=0
+    buf ->>+ data: virtio_disk_rw
+    data ->>- buf: bp->valid=1
+    end
+    
+    Note left of buf: bp=bread(..)
+    
+    buf ->> buf: modify buffer data
+    Note right of buf: bp->data[..]=..
+   	
+   	alt log absorbtion
+    buf ->> log: lg.lh.block[i]=bp->blockno
+    end
+    log ->> cache: pin bp in cache
+    Note left of log: log_write(bp)
+    
+    log ->> lgblk: write_log()<br/>modified buf: cache->log
+    lgblk ->> sup: write_head()<br/>write log header
+    lgblk ->> data: install_trans()
+    lgblk ->> sup: write_head()<br>erase transaction
+    
+    Note left of sup: end_op()
+```
+
+**In memory**: buffer cache, buffer bp, strcuct log.
+
+**In disk**: super block, log block, data block.
 
 #### initlog
 
@@ -328,4 +370,6 @@ recover_from_log(void)
   write_head(); // clear the log
 }
 ```
+
+​	
 
