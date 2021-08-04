@@ -1,6 +1,22 @@
-# Inode layer
-
-[toc]
+- [Structure](#structure)
+  - [On-disk inodes](#on-disk-inodes)
+  - [In-memory inodes](#in-memory-inodes)
+  - [lock-like mechanism](#lock-like-mechanism)
+  - [Inode cache](#inode-cache)
+- [Typical usage](#typical-usage)
+  - [iget](#iget)
+  - [ilock](#ilock)
+- [Block allocator](#block-allocator)
+- [Code](#code)
+  - [ialloc](#ialloc)
+  - [iget](#iget-1)
+  - [ilock and iunlock](#ilock-and-iunlock)
+  - [iput](#iput)
+  - [bmap](#bmap)
+  - [itrunc](#itrunc)
+  - [readi](#readi)
+  - [writei](#writei)
+  - [stati](#stati)
 
 The term inode can have one of two related meanings (structure name or entity). 
 
