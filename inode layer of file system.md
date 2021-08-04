@@ -263,7 +263,7 @@ ialloc(uint dev, short type)
 }
 ```
 
-The correct operation of ialloc depends on the fact that **only one process at a time can be holding a reference to bp**: ialloc can be sure that some other process does not simultaneously see that the inode is available and try to claim it.
+The correct operation of ialloc depends on the fact that **only one process at a time can be holding a reference to bp**  (bread return a locked buffer): ialloc can be sure that some other process does not simultaneously see that the inode is available and try to claim it.
 
 ### iget
 
@@ -305,7 +305,7 @@ iget(uint dev, uint inum)
 }
 ```
 
-Iget looks through the inode cache for an active entry (ip->ref > 0) with the desired device and inode number. If it finds one, it returns a new reference to that inode. 
+Iget looks through the inode cache for an active entry (ip->ref > 0) with the desired device and inode number. If it finds one, it **returns a new reference to that inode**. 
 
 As iget scans, it records the position of the first empty slot, which it uses if it needs to allocate a cache entry.
 
@@ -417,19 +417,20 @@ iput() can write to the disk. **This means that any system call that uses the fi
 
 **There is a challenging interaction between iput() and crashes**. 
 
-- iput() doesn’t truncate a file immediately when the link count for the file drops to zero, because some process might still hold a reference to the inode in memory: a process might still be reading and writing to the file, because it successfully opened it. 
-- But, if a crash happens before the last process closes the file descriptor for the file, then the file will be marked allocated on disk but no directory entry will point to it.
+iput() doesn’t truncate a file immediately when the link count for the file drops to zero, because some process might still hold a reference to the inode in memory: a process might still be reading and writing to the file, because it successfully opened it. 
+
+But, if a crash happens before the last process closes the file descriptor for the file, then **the file will be marked allocated on disk but no directory entry will point to it**.
 
 File systems handle this case in one of two ways. 
 
-1. The simple solution is that on recovery, after reboot, the file system scans the whole file system for files that are marked allocated, but have no directory entry pointing to them. If any such file exists, then it can free those files.
-2. The second solution doesn’t require scanning the file system. In this solution, the file system records on disk (e.g., in the super block) the inode inumber of a file whose link count drops to zero but whose reference count isn’t zero. If the file system removes the file when its reference counts reaches 0, then it updates the on-disk list by removing that inode from the list. On recovery, the file system frees any file in the list.
+1. The simple solution is that on recovery, after reboot, the file system **scans the whole file system** for files that are marked allocated, but have no directory entry pointing to them. If any such file exists, then it can free those files.
+2. The second solution doesn’t require scanning the file system. In this solution, the file system **records on disk (e.g., in the super block) the inode inumber of a file whose link count drops to zero but whose reference count isn’t zero**. If the file system removes the file when its reference counts reaches 0, then it updates the on-disk list by removing that inode from the list. On recovery, the file system frees any file in the list.
 
 **Xv6 implements neither solution, which means that inodes may be marked allocated on disk, even though they are not in use anymore**. This means that over time xv6 runs the risk that it may run out of disk space.
 
 ### bmap
 
- The function bmap manages the representation so that higher-level routines such as readi and writei, which we will see shortly. Bmap returns the disk block number of the bn’th data block for the inode ip. If ip does not have such a block yet, bmap allocates one.
+Bmap returns the disk block number of the bn’th data block for the inode ip. If ip does not have such a block yet, bmap allocates one.
 
 ```c++
 // Inode content
