@@ -12,4 +12,5 @@ All the raw materials come from [MIT 6.S081](https://pdos.csail.mit.edu/6.828/20
 [Sleep and wakeup](https://github.com/guisongchen/notes-of-6.S081/blob/main/sleep_and_wakeup.md)  
 [File system:overview](https://github.com/guisongchen/notes-of-6.S081/blob/main/file%20system%20overview.md)  
 [File system:buffer cache layer](https://github.com/guisongchen/notes-of-6.S081/blob/main/buffer%20cache%20layer%20of%20file%20system.md)  
-[File system:logging layer](https://github.com/guisongchen/notes-of-6.S081/blob/main/logging%20layer%20of%20file%20system.md)
+[File system:logging layer](https://github.com/guisongchen/notes-of-6.S081/blob/main/logging%20layer%20of%20file%20system.md)  
+[File system:inode layer](https://github.com/guisongchen/notes-of-6.S081/blob/main/inode%20layer%20of%20file%20system.md)
