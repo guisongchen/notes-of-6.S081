@@ -7,9 +7,9 @@ The term inode can have one of two related meanings (structure name or entity).
 - It might refer to the on-disk data structure containing a file’s size and list of data block numbers. 
 - Or “inode” might refer to an in-memory inode, which contains a copy of the on-disk inode as well as extra information needed within the kernel.
 
-### Structure
+## Structure
 
-#### On-disk inodes
+### On-disk inodes
 
 The on-disk inodes are packed into a **contiguous area of disk** called the inode blocks. Every inode is the same size, so it is easy, given a number n, to find the nth inode on the disk. In fact, this number n, called the inode number or i-number, is how inodes are identified in the implementation.
 
@@ -41,7 +41,7 @@ Thus the first 12 kB ( NDIRECT x BSIZE) bytes of a file can be loaded from block
 
 ![dinode](./pic/dinode.png)
 
-#### In-memory inodes
+### In-memory inodes
 
 ```c++
 // in-memory copy of an inode
@@ -64,29 +64,172 @@ struct inode {
 The kernel keeps the set of active inodes in memory; **struct inode is the in-memory copy of a struct dinode on disk**. 
 
 - The kernel stores an inode in memory only if there are C pointers referring to that inode. 
-- The ref field counts the number of C pointers referring to the in-memory inode, and the kernel discards the inode from memory if the reference count drops to zero. 
-- The iget and iput functions acquire and release pointers to an inode, modifying the reference count. 
+- The **ref** field c**ounts the number of C pointers referring to the in-memory inode**, and the kernel discards the inode from memory if the reference count drops to zero. 
+- The **iget and iput** functions acquire and release pointers to an inode, **modifying the reference count**. 
 
 Pointers to an inode can come from file descriptors, current working directories, and transient kernel code such as exec.
 
-#### lock-like mechanism
+### lock-like mechanism
 
 There are four lock or lock-like mechanisms in xv6’s inode code. 
 
 1. **icache.lock protects the invariant that an inode is present in the cache at most once**, and the invariant that a cached inode’s ref field counts the number of in-memory pointers to the cached inode. 
 2. Each in-memory inode has a **lock** field containing a sleep-lock, which ensures exclusive access to the inode’s fields (such as file length) as well as to the inode’s file or directory content blocks. 
-3. An inode’s **ref**, if it is greater than zero, causes the system to maintain the inode in the cache, and not re-use the cache entry for a different inode. 
+3. An inode’s **ref**, if it is greater than zero, **causes the system to maintain the inode in the cache**, and not re-use the cache entry for a different inode. 
 4. Finally, each inode contains a **nlink** field (on disk and copied in memory if it is cached) that counts the number of directory entries that refer to a file; xv6 won’t free an inode if its link count is greater than zero.
 
-#### Inode cache
+| lock level | lock-like mechanism                                          |
+| ---------- | ------------------------------------------------------------ |
+| in memory  | **sleeplock** in **struct inode**                            |
+| in cache   | **ref** field in strcut inode, **spinlock** in **struct icache** |
+| in disk    | **nlink** field in strcut inode                              |
+
+### Inode cache
 
 The **inode cache** only caches inodes to which kernel code or data structures hold C pointers. Its **main job** is really **synchronizing access by multiple processes**; **caching is secondary**. 
 
-If an inode is used frequently, the buffer cache will probably keep it in memory if it isn’t kept by the inode cache. The inode cache is write-through, which means that code that modifies a cached inode must immediately write it to disk with iupdate.
+```c++
+struct {
+  struct spinlock lock;
+  struct inode inode[NINODE];
+} icache;
+```
 
-### Code
+If an inode is used frequently, the **buffer cache** will probably keep it in memory if it isn’t kept by the inode cache. The inode cache is write-through, which means that code that **modifies a cached inode must immediately write it to disk with iupdate**.(where buffer cache recylcle brelse buffer according to LRU)
 
-#### ialloc
+## Typical usage
+
+```c++
+// Thus a typical sequence is:
+ip = iget(dev, inum)
+ilock(ip)
+... examine and modify ip->xxx ...
+iunlock(ip)
+iput(ip)
+```
+
+### iget
+
+**A struct inode pointer returned by iget() is guaranteed to be valid until the corresponding call to iput().**
+
+- The inode won’t be deleted, and the memory referred to by the pointer won’t be re-used for a different inode. 
+- iget() provides non-exclusive access to an inode, so that there can be many pointers to the same inode. 
+
+Many parts of the file-system code depend on this behavior of iget(), both to hold long-term references to inodes (as open files and current directories) and to prevent races while avoiding deadlock in code that manipulates multiple inodes (such as pathname lookup).
+
+### ilock
+
+The struct inode that iget returns may not have any useful content. **In order to ensure it holds a copy of the on-disk inode, code must call ilock**. 
+
+- ilock() locks the inode (so that no other process can ilock it) and reads the inode from the disk, if it has not already been read. 
+- iunlock() releases the lock on the inode. 
+
+Acquisition of inode pointers(iget) and locking inode(ilock) are separated.
+
+**Separating acquisition of inode pointers from locking helps avoid deadlock in some situations**, for example during directory lookup. **Multiple processes can hold a C pointer to an inode returned by iget, but only one process can lock the inode at a time.**
+
+## Block allocator
+
+File and directory content is stored in disk blocks, which must be allocated from a free pool. xv6’s block allocator **maintains a free bitmap on disk**, with one bit per block. 
+
+- A zero bit indicates that the corresponding block is free
+- A one bit indicates that it is in use. 
+
+The program **mkfs sets the bits** corresponding to the boot sector, superblock, log blocks, inode blocks, and bitmap blocks.
+
+Review the structure of disk layout:
+
+```c++
+// Disk layout:
+// [ boot block | super block | log | inode blocks |
+//                                          free bit map | data blocks]
+//
+// mkfs computes the super block and builds an initial file system. The
+// super block describes the disk layout:
+struct superblock {
+  uint magic;        // Must be FSMAGIC
+  uint size;         // Size of file system image (blocks)
+  uint nblocks;      // Number of data blocks
+  uint ninodes;      // Number of inodes.
+  uint nlog;         // Number of log blocks
+  uint logstart;     // Block number of first log block
+  uint inodestart;   // Block number of first inode block
+  uint bmapstart;    // Block number of first free map block
+};
+```
+
+**The super block describes the disk layout.**
+
+```c++
+// Allocate a zeroed disk block.
+static uint
+balloc(uint dev)
+{
+  int b, bi, m;
+  struct buf *bp;
+
+  bp = 0;
+  for(b = 0; b < sb.size; b += BPB){
+    bp = bread(dev, BBLOCK(b, sb));
+    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
+      m = 1 << (bi % 8);
+      if((bp->data[bi/8] & m) == 0){  // Is block free?
+        bp->data[bi/8] |= m;  // Mark block in use.
+        log_write(bp);
+        brelse(bp);
+        bzero(dev, b + bi);
+        return b + bi;
+      }
+    }
+    brelse(bp);
+  }
+  panic("balloc: out of blocks");
+}
+```
+
+The loop in balloc considers every block, starting at block 0 up to sb.size (sb is superblock struct), the number of blocks in the file system. A block has BPB bits.
+
+```c++
+#define BSIZE 1024  // block size
+// Bitmap bits per block
+define BPB           (BSIZE*8)
+// Block of free map containing bit for block b
+#define BBLOCK(b, sb) ((b)/BPB + sb.bmapstart)
+```
+
+Balloc looks for a block whose bitmap bit is zero, indicating that it is free. If balloc finds such a block, it updates the bitmap and returns the block. 
+
+For efficiency, the loop is split into two pieces. 
+
+- The outer loop reads each block of bitmap bits. 
+- The inner loop checks all BPB bits in a single bitmap block. 
+
+The race that might occur if two processes try to allocate a block at the same time is prevented by the fact that the buffer cache only lets one process use any one bitmap block at a time.
+
+```c++
+// Free a disk block.
+static void
+bfree(int dev, uint b)
+{
+  struct buf *bp;
+  int bi, m;
+
+  bp = bread(dev, BBLOCK(b, sb));
+  bi = b % BPB;
+  m = 1 << (bi % 8);
+  if((bp->data[bi/8] & m) == 0)
+    panic("freeing free block");
+  bp->data[bi/8] &= ~m;
+  log_write(bp);
+  brelse(bp);
+}
+```
+
+Bfree finds the right bitmap block and clears the right bit. Again the exclusive use implied by bread and brelse avoids the need for explicit locking.
+
+## Code
+
+### ialloc
 
 Ialloc is similar to balloc: 
 
@@ -122,21 +265,7 @@ ialloc(uint dev, short type)
 
 The correct operation of ialloc depends on the fact that **only one process at a time can be holding a reference to bp**: ialloc can be sure that some other process does not simultaneously see that the inode is available and try to claim it.
 
-#### iget
-
-**A struct inode pointer returned by iget() is guaranteed to be valid until the corresponding call to iput().**
-
-- The inode won’t be deleted, and the memory referred to by the pointer won’t be re-used for a different inode. 
-- iget() provides non-exclusive access to an inode, so that there can be many pointers to the same inode. 
-
-Many parts of the file-system code depend on this behavior of iget(), both to hold long-term references to inodes (as open files and current directories) and to prevent races while avoiding deadlock in code that manipulates multiple inodes (such as pathname lookup).
-
-Acquisition of inode pointers(iget) and locking inode(ilock) are separated.
-
-- The struct inode that iget returns may not have any useful content. **In order to ensure it holds a copy of the on-disk inode, code must call ilock**. 
-- "ilock" locks the inode (so that no other process can ilock it) and reads the inode from the disk, if it has not already been read. iunlock releases the lock on the inode. 
-
-**Separating acquisition of inode pointers from locking helps avoid deadlock in some situations**, for example during directory lookup. Multiple processes can hold a C pointer to an inode returned by iget, but only one process can lock the inode at a time.
+### iget
 
 ```c++
 // Find the inode with number inum on device dev
@@ -180,7 +309,7 @@ Iget looks through the inode cache for an active entry (ip->ref > 0) with the de
 
 As iget scans, it records the position of the first empty slot, which it uses if it needs to allocate a cache entry.
 
-#### ilock and iunlock
+### ilock and iunlock
 
 Code must lock the inode using ilock before reading or writing its metadata or content. Ilock uses a sleep-lock for this purpose. Once ilock has exclusive access to the inode, it reads the inode from disk (more likely, the buffer cache) if needed. The function iunlock releases the sleep-lock, which may cause any processes sleeping to be woken up.
 
@@ -227,7 +356,7 @@ iunlock(struct inode *ip)
 }
 ```
 
-#### iput
+### iput
 
 Iput releases a C pointer to an inode by **decrementing the reference count**. If this is the last reference, the inode’s slot in the inode cache is now free and can be re-used for a different inode. 
 
@@ -298,7 +427,7 @@ File systems handle this case in one of two ways.
 
 **Xv6 implements neither solution, which means that inodes may be marked allocated on disk, even though they are not in use anymore**. This means that over time xv6 runs the risk that it may run out of disk space.
 
-#### bmap
+### bmap
 
  The function bmap manages the representation so that higher-level routines such as readi and writei, which we will see shortly. Bmap returns the disk block number of the bn’th data block for the inode ip. If ip does not have such a block yet, bmap allocates one.
 
@@ -347,7 +476,7 @@ The function bmap begins by picking off the easy case: the first NDIRECT blocks 
 
 Bmap allocates blocks as needed. An ip->addrs[] or indirect entry of zero indicates that no block is allocated. As bmap encounters zeros, it replaces them with the numbers of fresh blocks, allocated on demand.
 
-#### itrunc
+### itrunc
 
 itrunc frees a file’s blocks, resetting the inode’s size to zero. 
 
@@ -387,7 +516,7 @@ itrunc(struct inode *ip)
 }
 ```
 
-#### readi
+### readi
 
 Readi starts by making sure that the offset and count are not beyond the end of the file. Reads that start beyond the end of the file return an error while reads that start at or cross the end of the file return fewer bytes than requested. The main loop processes each block of the file, copying data from the buffer into dst.
 
@@ -421,7 +550,7 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 }
 ```
 
-#### writei
+### writei
 
 writei is identical to readi, with three exceptions: 
 
@@ -471,7 +600,7 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
 }
 ```
 
-#### stati
+### stati
 
 The function stati copies inode metadata into the stat structure, which is exposed to user programs via the stat system call.
 
