@@ -1,6 +1,15 @@
-
-
-[toc]
+- [Directory layer](#directory-layer)
+  - [Structure](#structure)
+  - [Review](#review)
+  - [Code](#code)
+    - [dirlookup](#dirlookup)
+    - [dirlink](#dirlink)
+- [Path name layer](#path-name-layer)
+  - [Structure](#structure-1)
+  - [Challanges](#challanges)
+- [File descriptor layer](#file-descriptor-layer)
+  - [Structure](#structure-2)
+  - [Code](#code-1)
 
 ## Directory layer
 
