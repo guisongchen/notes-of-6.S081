@@ -1,8 +1,14 @@
+
+
 [toc]
 
 ## Directory layer
 
 ### Structure
+
+It's time to review dinode structure first, and notice that inode is in-memory copy of dinode:
+
+![dinode](./pic/dinode.png)
 
 A directory is implemented internally much like a file. **Its inode has type T_DIR and its data is a sequence of directory entries**. Each entry is a struct dirent, which contains a name and an inode number. The name is at most DIRSIZ (14) characters; if shorter, it is terminated by a NUL (0) byte. Directory entries with inode number zero are free.
 
@@ -13,11 +19,47 @@ struct dirent {
 };
 ```
 
+Now is a good time to review relevant structs and where does the data be storaged:
+
+| Struct Name | Where data lives          | Info                                        |
+| :---------- | :------------------------ | :------------------------------------------ |
+| inode       | **uint** addrs[NDIRECT+1] | NDIRECT  direct blocks<br/>1 indirect block |
+| dinode      | **uint** addrs[NDIRECT+1] | NDIRECT  direct blocks<br/>1 indirect block |
+| bcache      | **struct buf** buf[NBUF]  | cached NBUF buffer                          |
+| buf         | **uchar** data[BSIZE]     | BSIZE is block size(xv6 1024bytes )         |
+
+
+
+### Review
+
+Also, a good time to review all kinds of read function:
+
+| Function Name  | input parameters                                          | Return                   | where read data lives |
+| :------------- | :-------------------------------------------------------- | :----------------------- | --------------------- |
+| readi          | *inode<br/>user_dst flag<br/>dst addr<br/>offset<br/>size | successful<br/>read size | *inode                |
+| bread          | dev (disk section)<br/>blockno                            | *buf                     | *buf                  |
+| bget           | dev (disk section)<br/>blockno                            | *buf                     | *buf                  |
+| virtio_disk_rw | *buf<br/>write_flag                                       | void                     | *buf                  |
+
+readi did two things:
+
+1. get buffer data of each block in addr[NDIRECT+1].
+
+2. copy buffer data into dst addr.
+
+bread is more like an interface, bget and virtio_disk_rw do the real job.
+
+- bget search corresponding blockno buffer in buffer cache
+  - if found, return locked buffer.
+  - if not found, recycle LRU unused buffer, marked as invalid(valid=0), return lock buffer.
+- bread check bget ruturned buffer, if not valid, virtio_disk_rw read buffer data from disk.
+- bread return a locked and valid buffer.
+
 ### Code
 
 #### dirlookup
 
-The function dirlookup searches a directory for an entry with the given name. If it finds one, it returns a pointer to the corresponding inode, unlocked, and sets *poff to the byte offset of the entry within the directory, in case the caller wishes to edit it. 
+The function dirlookup searches a directory for an entry with the given name. If it finds one, it returns a pointer to the corresponding inode, unlocked, and **sets *poff to the byte offset of the entry within the directory, in case the caller wishes to edit it.** 
 
 If dirlookup finds an entry with the right name, it updates *poff and returns an unlocked inode obtained via iget. **Dirlookup is the reason that iget returns unlocked inodes**. The caller can unlock dp and then lock ip, ensuring that it only holds one lock at a time.
 
@@ -51,9 +93,11 @@ dirlookup(struct inode *dp, char *name, uint *poff)
 }
 ```
 
+**Iget** looks through the **inode cache** for an active entry (ip->ref > 0) with the desired device and inode number. If it finds one, it **returns a new reference to that inode**. 
+
 #### dirlink
 
-The function dirlink writes a new directory entry with the given name and inode number into the directory dp. If the name already exists, dirlink returns an error. 
+**The function dirlink writes a new directory entry with the given name and inode number into the directory dp.** If the name already exists, dirlink returns an error. 
 
 The main loop reads directory entries looking for an unallocated entry. When it finds one, it stops the loop early, with off set to the offset of the available entry. Otherwise, the loop ends with off set to dp->size. Either way, dirlink then adds a new entry to the directory by writing at offset off.
 
@@ -88,6 +132,8 @@ dirlink(struct inode *dp, char *name, uint inum)
   return 0;
 }
 ```
+
+Iput releases a C pointer to an inode by **decrementing the reference count**. If this is the last reference, the inode’s slot in the inode cache is now free and can be re-used for a different inode. 
 
 ## Path name layer
 
@@ -148,7 +194,16 @@ Each call to open creates a new open file (a new struct file): **if multiple pro
 
 ### Code
 
-All the open files in the system are kept in a global file table, the ftable. The file table has functions to allocate a file (filealloc), create a duplicate reference (filedup), release a reference (fileclose), and read and write data (fileread and filewrite).
+**All the open files in the system are kept in a global file table, the ftable**. 
+
+```c++
+struct {
+  struct spinlock lock;
+  struct file file[NFILE];
+} ftable;
+```
+
+The file table has functions to allocate a file (filealloc), create a duplicate reference (filedup), release a reference (fileclose), and read and write data (fileread and filewrite).
 
 - filealloc scans the file table for an unreferenced file (f->ref == 0) and returns a new reference
 - filedup increments the reference count
@@ -157,6 +212,6 @@ All the open files in the system are kept in a global file table, the ftable. Th
 The functions filestat, fileread, and filewrite implement the stat, read, and write operations on files. 
 
 - filestat is only allowed on inodes and calls stati. 
-- fileread and filewrite check that the operation is allowed by the open mode and then pass the call through to either the pipe or inode implementation. 
+- **fileread and filewrite check that the operation is allowed by the open mode and then pass the call through to either the pipe or inode implementation.** 
 
 If the file represents an inode, fileread and filewrite use the I/O offset as the offset for the operation and then advance it. Pipes have no concept of offset. Recall that the inode functions require the caller to handle locking. The inode locking has the convenient side effect that the read and write offsets are updated atomically, so that multiple writing to the same file simultaneously cannot overwrite each other’s data, though their writes may end up interlaced.
