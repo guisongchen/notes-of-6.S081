@@ -374,8 +374,15 @@ All those steps are intuitive except check leaf. what makes a leaf ?
 Let us review mappages:
 
 1. leaf is the level-0 PTE, which points to entry of physical page.
+
 2. we get PTE from "walk", at this moment, only PTE_V flag was set.
-3. then when we map PTE to pa, we set other permissions flag at the same time.
+
+3. then when we map PTE to pa, we **set other permissions flag at the same time**.
+
+   which means:
+
+   - if PTE-pa mapped, PTE_FLAGS(*pte) **!=** PTE_V (it may points to next pagetable, so not a leaf)
+   - if PTE-pa NOT mapped, PTE_FLAGS(*pte) **!=** PTE_V
 
 "mappages" did two things: 
 
